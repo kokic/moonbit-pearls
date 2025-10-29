@@ -1,120 +1,14 @@
-///|
-using @list {type List}
 
-///|
-trait HasNil {
-  nil() -> Self
-}
+---
+title: 回到 Leibniz
+taxon: exegesis
+date: 2025-10-29
+author: [kokic](https://kokic.github.io)
+---
 
-///|
-trait HasOne {
-  one() -> Self
-}
+为了方便进行符号微分, 我们先定义一个表达式类型 `Expr`, 其数据显然是树状的, 所以我们使用 `enum` 刻画此归纳结构.
 
-///|
-trait Inverse {
-  inverse(Self) -> Self
-}
-
-///|
-trait AddMonoid: Add + HasNil {}
-
-///|
-trait MulMonoid: Mul + HasOne {}
-
-///|
-trait Semiring: AddMonoid + MulMonoid {}
-
-///|
-trait StarSemiring: Semiring {
-  star(Self) -> Self
-}
-
-///|
-fn[R : HasOne + Add + Neg + Inverse] star(x : R) -> R {
-  (R::one() + x.neg()).inverse()
-}
-
-///|
-struct Mat2x2[R] {
-  a : R
-  b : R
-  c : R
-  d : R
-} derive(Show, Eq)
-
-///|
-fn[R] Mat2x2::mk(a : R, b : R, c : R, d : R) -> Mat2x2[R] {
-  { a, b, c, d }
-}
-
-///|
-impl[R : Semiring] HasNil for Mat2x2[R] with nil() {
-  Mat2x2::mk(R::nil(), R::nil(), R::nil(), R::nil())
-}
-
-///|
-impl[R : Semiring] HasOne for Mat2x2[R] with one() {
-  Mat2x2::mk(R::one(), R::nil(), R::nil(), R::one())
-}
-
-///|
-impl[R : Add] Add for Mat2x2[R] with add(u : Mat2x2[R], v : Mat2x2[R]) {
-  Mat2x2::mk(u.a + v.a, u.b + v.b, u.c + v.c, u.d + v.d)
-}
-
-///|
-impl[R : Add + Mul] Mul for Mat2x2[R] with mul(u : Mat2x2[R], v : Mat2x2[R]) {
-  {
-    a: u.a * v.a + u.b * v.c,
-    b: u.a * v.b + u.b * v.d,
-    c: u.c * v.a + u.d * v.c,
-    d: u.c * v.b + u.d * v.d,
-  }
-}
-
-///|
-impl[R : Semiring] Semiring for Mat2x2[R]
-
-///|
-fn[R, S] Mat2x2::map(u : Mat2x2[R], f : (R) -> S) -> Mat2x2[S] {
-  Mat2x2::mk(f(u.a), f(u.b), f(u.c), f(u.d))
-}
-
-///|
-impl[R : Neg] Neg for Mat2x2[R] with neg(u : Mat2x2[R]) -> Mat2x2[R] {
-  u.map(r => -r)
-}
-
-///|
-impl[R : Neg + Add] Sub for Mat2x2[R] with sub(u : Mat2x2[R], v : Mat2x2[R]) {
-  u + v.neg()
-}
-
-///|
-impl[R : StarSemiring] StarSemiring for Mat2x2[R] with star(u : Mat2x2[R]) {
-  let (a, b, c, d) = (u.a, u.b, u.c, u.d)
-  let dalt = d.star()
-  let balt = b * dalt
-  let aalt = (a + balt * c).star()
-  let calt = dalt * c * aalt
-  Mat2x2::mk(aalt, aalt * balt, calt, dalt + calt * balt)
-}
-
-///|
-fn[R : StarSemiring + Neg] Mat2x2::inverse(u : Mat2x2[R]) -> Mat2x2[R] {
-  (Mat2x2::one() + u.neg()).star()
-}
-
-///|
-impl[R : StarSemiring + Neg] Div for Mat2x2[R] with div(
-  u : Mat2x2[R],
-  v : Mat2x2[R],
-) {
-  u * v.inverse()
-}
-
-///|
+```mbt
 enum Expr {
   Symbol(String)
   Const(Float)
@@ -123,8 +17,11 @@ enum Expr {
   Mul(Expr, Expr)
   Div(Expr, Expr)
 } derive(Eq, Show)
+```
 
-///|
+然后为了打印和借助其他工具简化结果, 我们为 `Expr` 定义一个 `to_sexp` 方法. 
+
+```mbt
 fn Expr::to_sexp(e : Expr) -> String {
   match e {
     Symbol(x) => x
@@ -135,77 +32,96 @@ fn Expr::to_sexp(e : Expr) -> String {
     Div(a, b) => "(/ \{a.to_sexp()} \{b.to_sexp()})"
   }
 }
+```
 
-///|
-test {
-  assert_eq(Mat2x2::nil(), Mat2x2::mk(Const(0), Const(0), Const(0), Const(0)))
-}
+与例子 [`Mat2x2[Float]`](./float.md) 类似, 可以为 `Expr` 实现 [星半环](./traits.md) 特质. 
 
-///|
+```
 impl HasNil for Expr with nil() {
   Const(0)
 }
 
-///|
 impl HasOne for Expr with one() {
   Const(1)
 }
 
-///|
 impl Neg for Expr with neg(x : Expr) {
   Neg(x)
 }
 
-///|
 impl Inverse for Expr with inverse(x : Expr) {
   Div(Const(1), x)
 }
 
-///|
 impl Add for Expr with add(a : Expr, b : Expr) {
   Add(a, b)
 }
 
-///|
 impl Mul for Expr with mul(a : Expr, b : Expr) {
   Mul(a, b)
 }
 
-///|
 impl Semiring for Expr
 
-///|
 impl StarSemiring for Expr with star(x : Expr) {
   star(x)
 }
+```
 
-///|
+到这一步, 进行符号微分所需的全部定义就结束了. 以下只是一些简化调用的函数. 
+
+```
 fn shear(a : Expr, b : Expr) -> Mat2x2[Expr] {
   Mat2x2::mk(a, b, Expr::nil(), a)
 }
 
-///|
 let symbol : (String) -> Mat2x2[Expr] = name => shear(Symbol(name), Const(1))
 
-///|
 fn function(name : String) -> Mat2x2[Expr] {
   shear(Symbol(name), Symbol("\{name}'"))
 }
 
-///|
 let extract : (Mat2x2[Expr]) -> String = u => u.b.to_sexp()
+```
 
-///|
+现在, 微分的线性性和 Leibniz 律将自然地被 `Mat2x2[Expr]` 上的加法和乘法导出. 
+
+```mbt
 test "leibniz rule" {
   let (f, g) = (function("f"), function("g"))
   assert_eq(extract(f * g), "(+ (* f g') (* f' g))")
+}
+```
+
+而 $(f/g)'$ 按 $(f g^{-1})'$ 计算即可. 再次强调, 此处 `f` 和 `g` 的类型是 `Mat2x2[Expr]`, 换言之 $f,g$ 实际上是两个矩阵, $g^{-1}$ 按 [前文实现的矩阵逆](./kira.md) 计算. 
+
+```mbt
+impl[R : StarSemiring + Neg] Div for Mat2x2[R] with div(
+  u : Mat2x2[R],
+  v : Mat2x2[R],
+) {
+  u * v.inverse()
+}
+```
+
+```mbt
+test "leibniz rule" {
   assert_eq(
-    extract(f / g),
+    extract(f * g.inverse()),
     "(+ (* f (* (/ 1 (+ 1 (- 0 (+ (+ 1 (- 0 g)) (* (* (+ 0 (- 0 g')) (/ 1 (+ 1 (- 0 (+ 1 (- 0 g)))))) (+ 0 (- 0 0))))))) (* (+ 0 (- 0 g')) (/ 1 (+ 1 (- 0 (+ 1 (- 0 g)))))))) (* f' (+ (/ 1 (+ 1 (- 0 (+ 1 (- 0 g))))) (* (* (* (/ 1 (+ 1 (- 0 (+ 1 (- 0 g))))) (+ 0 (- 0 0))) (/ 1 (+ 1 (- 0 (+ (+ 1 (- 0 g)) (* (* (+ 0 (- 0 g')) (/ 1 (+ 1 (- 0 (+ 1 (- 0 g)))))) (+ 0 (- 0 0)))))))) (* (+ 0 (- 0 g')) (/ 1 (+ 1 (- 0 (+ 1 (- 0 g))))))))))",
   )
 }
+```
 
-///|
+读者可以用 [egg][egg] 或其他符号化简工具简化此处 `extract(f * g.inverse())` 的结果, 一个可能的形式是: 
+
+```
+(+ (* f (* (- g') (pow g -2))) (* (pow g -1) f'))
+```
+
+这当然就是 $(f'g - fg')/g^2 = (f/g)'$. 此方法对多变量情形也完全适用. 
+
+```mbt
 test "differentiation" {
   let x = symbol("x")
   let y = symbol("y")
@@ -216,3 +132,9 @@ test "differentiation" {
     "(+ (* x (* (/ 1 (+ 1 (- 0 (+ (+ 1 (- 0 y)) (* (* (+ 0 (- 0 1)) (/ 1 (+ 1 (- 0 (+ 1 (- 0 y)))))) (+ 0 (- 0 0))))))) (* (+ 0 (- 0 1)) (/ 1 (+ 1 (- 0 (+ 1 (- 0 y)))))))) (* 1 (+ (/ 1 (+ 1 (- 0 (+ 1 (- 0 y))))) (* (* (* (/ 1 (+ 1 (- 0 (+ 1 (- 0 y))))) (+ 0 (- 0 0))) (/ 1 (+ 1 (- 0 (+ (+ 1 (- 0 y)) (* (* (+ 0 (- 0 1)) (/ 1 (+ 1 (- 0 (+ 1 (- 0 y)))))) (+ 0 (- 0 0)))))))) (* (+ 0 (- 0 1)) (/ 1 (+ 1 (- 0 (+ 1 (- 0 y))))))))))",
   )
 }
+```
+
+最后的 `extract(x / y)` 可以简化为 `(+ (pow y -1) (* x (* -1 (pow y -2))))`, 即 $\frac{1}{y}-\frac{x}{y^2}$. 读者可以通过为 `Expr` 类型添加诸如 `Cos`, `Sin`, `Exp`, `Log` 此类其他构造器从而使本程序支持带有其他函数的微分运算, 这点与 [经典自动微分程序][ad-haskell] 的做法是一致的. 完整的 MoonBit 源代码可以在 [此处](https://github.com/kokic/moonbit-pearls/blob/main/trees/leibniz-amnesia/amnesia.mbt) 查看. 
+
+[egg]: https://github.com/egraphs-good/egg
+[ad-haskell]: https://www.danielbrice.net/blog/automatic-differentiation-is-trivial-in-haskell/

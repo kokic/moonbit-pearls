@@ -17,7 +17,7 @@ backlinks = "Backlinks"
 
 [build]
 typst-root = "trees"
-short-slug = false
+short-slug = true
 pretty-urls = false
 footer-mode = "link"
 inline-css = true
